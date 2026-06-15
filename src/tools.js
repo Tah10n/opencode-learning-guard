@@ -90,6 +90,10 @@ function normalizeEntry(content) {
   return normalized
 }
 
+function normalizeStoredEntry(content) {
+  return content.replace(/\s+/g, " ").trim()
+}
+
 function yamlString(value) {
   return JSON.stringify(value.replace(/\r?\n/g, " ").trim())
 }
@@ -218,6 +222,146 @@ function renderEntries(markdown, entries) {
 
 function entryBlockLength(entries) {
   return entries.map((entry) => `- ${entry}`).join("\n").length
+}
+
+function cleanupKey(entry) {
+  return entry
+    .toLowerCase()
+    .replace(/[`*_~[\]()#>"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function previewEntry(entry, { redacted = false } = {}) {
+  if (redacted) return "<redacted by safety scanner>"
+  return entry.length <= 100 ? entry : `${entry.slice(0, 97)}...`
+}
+
+function hasText(value) {
+  return value !== undefined && value !== null && `${value}`.trim() !== ""
+}
+
+function resolveEntryIndex(entries, args) {
+  if (hasText(args.entry_number)) {
+    const raw = `${args.entry_number}`.trim()
+    if (!/^\d+$/.test(raw)) throw new Error("entry_number must be a 1-based integer.")
+    const entryNumber = Number.parseInt(raw, 10)
+    if (entryNumber < 1 || entryNumber > entries.length) {
+      throw new Error(`entry_number ${entryNumber} is outside the memory entry range 1-${entries.length}.`)
+    }
+    const index = entryNumber - 1
+    if (hasText(args.expected_content)) {
+      const expected = normalizeStoredEntry(args.expected_content)
+      if (normalizeStoredEntry(entries[index]) !== expected) {
+        throw new Error(`expected_content did not match memory entry #${entryNumber}. Refusing to mutate a shifted entry.`)
+      }
+    }
+    return { index, label: `#${entryNumber}` }
+  }
+
+  const needle = `${args.old_text ?? ""}`.trim()
+  if (!needle) throw new Error("Provide old_text or entry_number.")
+  const matches = entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.includes(needle))
+  if (matches.length !== 1) throw new Error(`Expected exactly one match for old_text; found ${matches.length}.`)
+  return { index: matches[0].index, label: "old_text" }
+}
+
+function memoryAuditReport(entries) {
+  const used = entryBlockLength(entries)
+  const percent = MEMORY_CHAR_LIMIT === 0 ? 0 : Math.round((used / MEMORY_CHAR_LIMIT) * 100)
+  const findings = []
+  const seen = new Map()
+
+  entries.forEach((entry, index) => {
+    const entryNumber = index + 1
+    let unsafe = null
+    try {
+      scanUnsafe(entry)
+    } catch (error) {
+      unsafe = error?.message ?? "Rejected by safety scanner."
+      findings.push({
+        type: "unsafe",
+        entryNumber,
+        redacted: true,
+        message: `${unsafe} Review and remove or replace entry #${entryNumber}.`,
+      })
+    }
+
+    if (entry.length > MEMORY_ENTRY_LIMIT) {
+      findings.push({
+        type: "oversized",
+        entryNumber,
+        redacted: Boolean(unsafe),
+        message: `Entry #${entryNumber} is ${entry.length} chars; keep entries <= ${MEMORY_ENTRY_LIMIT} chars.`,
+      })
+    } else if (entry.length > Math.floor(MEMORY_ENTRY_LIMIT * 0.85)) {
+      findings.push({
+        type: "long-entry",
+        entryNumber,
+        redacted: Boolean(unsafe),
+        message: `Entry #${entryNumber} is ${entry.length} chars; consider tightening it during cleanup.`,
+      })
+    }
+
+    const key = cleanupKey(entry)
+    if (seen.has(key)) {
+      findings.push({
+        type: "duplicate",
+        entryNumber,
+        duplicateOf: seen.get(key),
+        redacted: Boolean(unsafe),
+        expectedContent: unsafe ? null : entry,
+        message: `Entry #${entryNumber} duplicates entry #${seen.get(key)}.`,
+      })
+    } else {
+      seen.set(key, entryNumber)
+    }
+
+    if (/\b([A-Za-z]:\\|\\\\|\/Users\/|\/home\/|cwd=|WORKFLOW\.md|mvnw|gradlew|pom\.xml|package\.json)\b/i.test(entry)) {
+      findings.push({
+        type: "scope-review",
+        entryNumber,
+        redacted: Boolean(unsafe),
+        message: `Entry #${entryNumber} looks project- or machine-specific; move it to project-local docs or skills unless it is explicitly scoped.`,
+      })
+    }
+  })
+
+  if (used > Math.floor(MEMORY_CHAR_LIMIT * 0.85)) {
+    findings.unshift({
+      type: "capacity",
+      message: `Memory block uses ${used}/${MEMORY_CHAR_LIMIT} chars (${percent}%). Consolidate before adding more entries.`,
+    })
+  }
+
+  const lines = [
+    "Memory cleanup audit",
+    `Entries: ${entries.length}`,
+    `Capacity: ${used}/${MEMORY_CHAR_LIMIT} chars (${percent}%)`,
+    "",
+  ]
+
+  if (findings.length === 0) {
+    lines.push("No mechanical cleanup candidates found.")
+  } else {
+    lines.push("Cleanup candidates:")
+    for (const finding of findings) {
+      const prefix = finding.entryNumber ? `entry #${finding.entryNumber}` : "memory"
+      lines.push(`- [${finding.type}] ${prefix}: ${finding.message}`)
+      if (finding.entryNumber) {
+        lines.push(`  preview: ${previewEntry(entries[finding.entryNumber - 1], { redacted: finding.redacted })}`)
+      }
+      if (finding.type === "duplicate" && finding.expectedContent) {
+        lines.push(`  safe remove args: entry_number=${JSON.stringify(String(finding.entryNumber))}, expected_content=${JSON.stringify(finding.expectedContent)}`)
+      }
+    }
+  }
+
+  lines.push("")
+  lines.push("This tool does not mutate memory. Apply reviewed cleanup with oc_learning_memory_remove or oc_learning_memory_replace; backups are created before writes.")
+  lines.push("Staleness requires human review; this audit only catches mechanical cleanup candidates.")
+
+  return lines.join("\n")
 }
 
 async function runPermissionEffect(effect) {
@@ -355,6 +499,16 @@ ${ENTRY_END}
       },
     }),
 
+    memory_audit: tool({
+      description: "Audit OpenCode memory for cleanup candidates without mutating files; reports duplicates, oversized entries, safety issues, capacity pressure, and scope concerns",
+      args: {},
+      async execute() {
+        await ensureMemoryFile()
+        const markdown = await fs.readFile(await memoryPath(), "utf8")
+        return memoryAuditReport(parseEntries(markdown))
+      },
+    }),
+
     memory_add: tool({
       description: "Add one verified, non-sensitive durable OpenCode memory entry; rejects secrets, prompt injection, duplicates, and over-capacity memory",
       args: {
@@ -378,45 +532,43 @@ ${ENTRY_END}
     }),
 
     memory_replace: tool({
-      description: "Replace exactly one durable memory entry using a unique substring match",
+      description: "Replace exactly one durable memory entry using a unique substring match or a guarded 1-based entry number",
       args: {
-        old_text: tool.schema.string().describe("Unique substring of the memory entry to replace"),
+        old_text: tool.schema.string().optional().describe("Unique substring of the memory entry to replace"),
+        entry_number: tool.schema.string().optional().describe("1-based entry number to replace when duplicates make old_text non-unique"),
+        expected_content: tool.schema.string().optional().describe("Optional current entry content guard when using entry_number"),
         content: tool.schema.string().describe("Replacement memory entry, <= 280 chars"),
       },
       async execute(args) {
         await ensureMemoryFile()
         const replacement = normalizeEntry(args.content)
-        const needle = args.old_text.trim()
-        if (!needle) throw new Error("old_text is empty.")
         const file = await memoryPath()
         const markdown = await fs.readFile(file, "utf8")
         const entries = parseEntries(markdown)
-        const matches = entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.includes(needle))
-        if (matches.length !== 1) throw new Error(`Expected exactly one match for old_text; found ${matches.length}.`)
-        entries[matches[0].index] = replacement
+        const target = resolveEntryIndex(entries, args)
+        entries[target.index] = replacement
         if (entryBlockLength(entries) > MEMORY_CHAR_LIMIT) throw new Error(`Replacement would exceed ${MEMORY_CHAR_LIMIT} chars.`)
-        const backup = await backupFile(file, "before memory_replace")
+        const backup = await backupFile(file, `before memory_replace ${target.label}`)
         await fs.writeFile(file, renderEntries(markdown, entries), "utf8")
         return `Replaced memory entry. Backup: ${backup ?? "none"}`
       },
     }),
 
     memory_remove: tool({
-      description: "Remove exactly one durable memory entry using a unique substring match",
+      description: "Remove exactly one durable memory entry using a unique substring match or a guarded 1-based entry number",
       args: {
-        old_text: tool.schema.string().describe("Unique substring of the memory entry to remove"),
+        old_text: tool.schema.string().optional().describe("Unique substring of the memory entry to remove"),
+        entry_number: tool.schema.string().optional().describe("1-based entry number to remove when duplicates make old_text non-unique"),
+        expected_content: tool.schema.string().optional().describe("Optional current entry content guard when using entry_number"),
       },
       async execute(args) {
         await ensureMemoryFile()
-        const needle = args.old_text.trim()
-        if (!needle) throw new Error("old_text is empty.")
         const file = await memoryPath()
         const markdown = await fs.readFile(file, "utf8")
         const entries = parseEntries(markdown)
-        const matches = entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.includes(needle))
-        if (matches.length !== 1) throw new Error(`Expected exactly one match for old_text; found ${matches.length}.`)
-        entries.splice(matches[0].index, 1)
-        const backup = await backupFile(file, "before memory_remove")
+        const target = resolveEntryIndex(entries, args)
+        entries.splice(target.index, 1)
+        const backup = await backupFile(file, `before memory_remove ${target.label}`)
         await fs.writeFile(file, renderEntries(markdown, entries), "utf8")
         return `Removed memory entry. Backup: ${backup ?? "none"}`
       },
@@ -514,6 +666,7 @@ ${ENTRY_END}
 const defaultTools = createLearningGuardTools()
 
 export const memory_list = defaultTools.memory_list
+export const memory_audit = defaultTools.memory_audit
 export const memory_add = defaultTools.memory_add
 export const memory_replace = defaultTools.memory_replace
 export const memory_remove = defaultTools.memory_remove

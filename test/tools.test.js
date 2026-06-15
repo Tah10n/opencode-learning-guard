@@ -27,6 +27,24 @@ ${body}
 `
 }
 
+function memorySkill(entries) {
+  return `---
+name: global-memory
+description: "Memory"
+license: MIT
+compatibility: opencode
+metadata:
+  managed_by: oc_learning
+  purpose: persistent-memory
+---
+# Global Memory
+
+<!-- oc-memory-entries:start -->
+${entries.map((entry) => `- ${entry}`).join("\n")}
+<!-- oc-memory-entries:end -->
+`
+}
+
 async function writeSkill(root, name, content) {
   const dir = path.join(root, "skills", name)
   await mkdir(dir, { recursive: true })
@@ -50,6 +68,118 @@ test("plugin mode writes to the configured OpenCode root", async (t) => {
 
   const markdown = await readFile(path.join(root, "skills", "global-memory", "SKILL.md"), "utf8")
   assert.match(markdown, /Remember verified project conventions compactly\./)
+})
+
+test("plugin mode can expose only read-only memory tools", async (t) => {
+  const root = await tempDir(t)
+  const hooks = await LearningGuardPlugin({}, { configRoot: root, toolset: "memory-read" })
+
+  assert.deepEqual(Object.keys(hooks.tool), ["oc_learning_memory_list", "oc_learning_memory_audit"])
+})
+
+test("plugin mode can expose an explicit bounded tool list", async (t) => {
+  const root = await tempDir(t)
+  const hooks = await LearningGuardPlugin({}, {
+    configRoot: root,
+    enabledTools: ["oc_learning_memory_list", "oc_learning_memory_add", "oc_learning_memory_list"],
+  })
+
+  assert.deepEqual(Object.keys(hooks.tool), [
+    "oc_learning_memory_list",
+    "oc_learning_memory_add",
+  ])
+})
+
+test("plugin mode rejects unknown toolset and tool ids", async (t) => {
+  const root = await tempDir(t)
+
+  await assert.rejects(
+    () => LearningGuardPlugin({}, { configRoot: root, toolset: "always-learn" }),
+    /Unknown toolset/,
+  )
+
+  await assert.rejects(
+    () => LearningGuardPlugin({}, { configRoot: root, enabledTools: ["oc_learning_memory_dump"] }),
+    /Unknown oc_learning tool id/,
+  )
+})
+
+test("memory_audit reports cleanup candidates without mutating memory", async (t) => {
+  const root = await tempDir(t)
+  const tools = createLearningGuardTools({ configRoot: root })
+  await writeSkill(root, "global-memory", memorySkill([
+    "Keep durable lessons compact and verified.",
+    "Keep durable lessons compact and verified.",
+    "For C:\\Users\\example\\repo, run npm run verify before pushing.",
+  ]))
+
+  const file = path.join(root, "skills", "global-memory", "SKILL.md")
+  const before = await readFile(file, "utf8")
+  const report = await tools.memory_audit.execute()
+  const after = await readFile(file, "utf8")
+
+  assert.match(report, /Memory cleanup audit/)
+  assert.match(report, /\[duplicate\] entry #2/)
+  assert.match(report, /safe remove args: entry_number="2"/)
+  assert.match(report, /\[scope-review\] entry #3/)
+  assert.equal(after, before)
+})
+
+test("memory_audit redacts unsafe stored entries in every finding preview", async (t) => {
+  const root = await tempDir(t)
+  const tools = createLearningGuardTools({ configRoot: root })
+  await writeSkill(root, "global-memory", memorySkill([
+    "api_key: super-secret-token",
+    "api_key: super-secret-token",
+  ]))
+
+  const report = await tools.memory_audit.execute()
+
+  assert.match(report, /\[unsafe\] entry #1/)
+  assert.match(report, /\[duplicate\] entry #2/)
+  assert.match(report, /<redacted by safety scanner>/)
+  assert.doesNotMatch(report, /super-secret-token/)
+  assert.doesNotMatch(report, /expected_content=/)
+})
+
+test("memory_remove and memory_replace can target duplicate entries by guarded entry number", async (t) => {
+  const root = await tempDir(t)
+  const tools = createLearningGuardTools({ configRoot: root })
+  await writeSkill(root, "global-memory", memorySkill([
+    "Keep durable lessons compact and verified.",
+    "Keep durable lessons compact and verified.",
+  ]))
+
+  await assert.rejects(
+    () => tools.memory_remove.execute({
+      old_text: "Keep durable lessons compact",
+    }),
+    /Expected exactly one match/,
+  )
+
+  await assert.rejects(
+    () => tools.memory_replace.execute({
+      entry_number: "2",
+      expected_content: "Different entry.",
+      content: "Keep durable lessons compact, verified, and scoped.",
+    }),
+    /expected_content did not match/,
+  )
+
+  await tools.memory_replace.execute({
+    entry_number: "2",
+    expected_content: "Keep durable lessons compact and verified.",
+    content: "Keep durable lessons compact, verified, and scoped.",
+  })
+
+  await tools.memory_remove.execute({
+    entry_number: "1",
+    expected_content: "Keep durable lessons compact and verified.",
+  })
+
+  const markdown = await readFile(path.join(root, "skills", "global-memory", "SKILL.md"), "utf8")
+  assert.doesNotMatch(markdown, /Keep durable lessons compact and verified\./)
+  assert.match(markdown, /Keep durable lessons compact, verified, and scoped\./)
 })
 
 test("managed-skill detection only trusts frontmatter metadata", async (t) => {

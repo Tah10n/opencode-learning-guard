@@ -16,15 +16,17 @@ should be used, see
 
 ## Naming
 
-The repository and capability family are named `opencode-learning`. The current
-plugin package name is `opencode-learning-guard` to emphasize that this package
-is an enforcement layer, not a decision-making agent.
+The repository and plugin package are named `opencode-learning-guard` to
+emphasize that this package is an enforcement layer, not a decision-making
+agent. The OpenCode tool ids keep the stable `oc_learning_*` prefix for
+compatibility with existing harness permissions and installed profiles.
 
 ## Tools
 
 Plugin export names:
 
 - `oc_learning_memory_list`
+- `oc_learning_memory_audit`
 - `oc_learning_memory_add`
 - `oc_learning_memory_replace`
 - `oc_learning_memory_remove`
@@ -39,6 +41,7 @@ sync it into `tools/oc_learning.js` when using OpenCode custom tools directly.
 
 - Compact global memory only.
 - Per-entry and total memory caps.
+- Read-only cleanup audit before curation.
 - Secret and prompt-injection scanner.
 - Realpath-based path confinement to the configured OpenCode root.
 - Backups before mutation.
@@ -67,6 +70,40 @@ Install this package as an OpenCode plugin with an explicit `configRoot` option:
 The plugin also accepts `config_root` or the `OPENCODE_CONFIG_ROOT` environment
 variable. It intentionally fails closed without one so an installed package does
 not write to its own package directory by mistake.
+
+Use the smallest tool surface that fits the active profile:
+
+```json
+{
+  "plugin": [
+    [
+      "opencode-learning-guard",
+      {
+        "configRoot": "C:\\Users\\you\\.config\\opencode",
+        "toolset": "memory-read"
+      }
+    ]
+  ]
+}
+```
+
+Available toolsets:
+
+- `all` / `improver`: expose every `oc_learning_*` tool.
+- `memory-read`: expose `oc_learning_memory_list` and `oc_learning_memory_audit`.
+- `memory-write`: expose memory audit/list/add/replace/remove tools.
+- `skills-write`: expose managed-skill create/patch/archive tools.
+- `none`: expose no tools.
+
+For tighter control, pass `enabledTools` with explicit tool ids. See
+[`docs/operational-policy.md`](docs/operational-policy.md) for the recommended
+read/write gates that keep memory useful instead of noisy.
+
+For memory cleanup, run `oc_learning_memory_audit` first. It reports duplicate,
+oversized, unsafe, capacity-pressure, and scope-review candidates without
+mutating files. Apply reviewed cleanup with `oc_learning_memory_remove` or
+`oc_learning_memory_replace`; both create backups before writes and can target a
+guarded `entry_number` when duplicates make substring matching ambiguous.
 
 For host profiles that use OpenCode custom-tool files directly, `src/tools.js`
 is also kept as a standalone tool module that can be copied into the host
