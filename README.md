@@ -10,6 +10,10 @@ The project is inspired by the self-improving agent work in
 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), but
 is intentionally scoped to OpenCode memory and managed-skill write safety.
 
+For the host orchestration profile that decides when these bounded write tools
+should be used, see
+[`opencode-harness`](https://github.com/Tah10n/opencode-harness).
+
 ## Tools
 
 Plugin export names:
