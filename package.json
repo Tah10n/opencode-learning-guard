@@ -20,12 +20,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Tah10n/opencode-learning-guard.git"
+    "url": "git+https://github.com/Tah10n/opencode-learning.git"
   },
   "bugs": {
-    "url": "https://github.com/Tah10n/opencode-learning-guard/issues"
+    "url": "https://github.com/Tah10n/opencode-learning/issues"
   },
-  "homepage": "https://github.com/Tah10n/opencode-learning-guard#readme",
+  "homepage": "https://github.com/Tah10n/opencode-learning#readme",
   "license": "MIT",
   "scripts": {
     "check": "node --check src/index.js && node --check src/tools.js",
