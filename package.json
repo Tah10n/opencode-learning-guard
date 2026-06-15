@@ -27,6 +27,9 @@
   },
   "homepage": "https://github.com/Tah10n/opencode-learning#readme",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.9.0"
+  },
   "scripts": {
     "check": "node --check src/index.js && node --check src/tools.js",
     "test": "node --test"
