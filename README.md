@@ -14,6 +14,12 @@ For the host orchestration profile that decides when these bounded write tools
 should be used, see
 [`opencode-harness`](https://github.com/Tah10n/opencode-harness).
 
+## Naming
+
+The repository and capability family are named `opencode-learning`. The current
+plugin package name is `opencode-learning-guard` to emphasize that this package
+is an enforcement layer, not a decision-making agent.
+
 ## Tools
 
 Plugin export names:
