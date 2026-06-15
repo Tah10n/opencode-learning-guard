@@ -18,6 +18,14 @@
     "skills",
     "self-improvement"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tah10n/opencode-learning-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Tah10n/opencode-learning-guard/issues"
+  },
+  "homepage": "https://github.com/Tah10n/opencode-learning-guard#readme",
   "license": "MIT",
   "scripts": {
     "check": "node --check src/index.js && node --check src/tools.js",
