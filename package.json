@@ -1,0 +1,30 @@
+﻿{
+  "name": "opencode-learning-guard",
+  "version": "0.1.0",
+  "description": "Bounded memory and managed-skill write tools for OpenCode.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": "./src/index.js",
+  "files": [
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "plugin",
+    "memory",
+    "skills",
+    "self-improvement"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/tools.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.4.7",
+    "effect": "4.0.0-beta.48"
+  }
+}
