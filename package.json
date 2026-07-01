@@ -1,14 +1,20 @@
 ﻿{
   "name": "opencode-learning-guard",
-  "version": "0.1.0",
-  "description": "Bounded memory and managed-skill write tools for OpenCode.",
+  "version": "0.2.0",
+  "description": "Deterministic enforcement tools for bounded OpenCode memory and managed-skill writes.",
   "type": "module",
   "main": "./src/index.js",
-  "exports": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./tools": "./src/tools.js",
+    "./standalone": "./src/standalone.js"
+  },
   "files": [
     "src",
     "docs",
     "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "keywords": [
@@ -31,8 +37,10 @@
     "node": ">=22.9.0"
   },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/tools.js",
-    "test": "node --test"
+    "check": "node --check src/index.js && node --check src/tools.js && node --check src/standalone.js",
+    "test": "node --test",
+    "pack:check": "npm pack --dry-run --json --cache .cache/npm",
+    "verify": "npm run check && npm test && npm run pack:check"
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.4.7",

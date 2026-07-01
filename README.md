@@ -1,29 +1,23 @@
-﻿# opencode-learning-guard
+# opencode-learning-guard
 
-Bounded write tools for OpenCode memory and agent-managed skills.
+Deterministic enforcement tools for bounded OpenCode memory and agent-managed
+skills.
 
-This package provides the deterministic enforcement layer for a controlled
-self-improvement workflow. It does not decide what should be remembered. It
-only validates and writes approved memory or managed-skill changes.
+This package is an enforcement layer, not a policy agent. It does not decide
+what should be remembered, evaluate whether a lesson is true, initiate
+self-improvement, edit product code, or write arbitrary OpenCode files. It only
+validates and applies explicitly requested changes to:
 
-The project is inspired by the self-improving agent work in
-[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), but
-is intentionally scoped to OpenCode memory and managed-skill write safety.
+- `skills/global-memory/SKILL.md`
+- managed skills under `skills/<name>/SKILL.md`
+- package-owned state under `.oc_learning/`
 
-For the host orchestration profile that decides when these bounded write tools
-should be used, see
-[`opencode-harness`](https://github.com/Tah10n/opencode-harness).
-
-## Naming
-
-The repository and plugin package are named `opencode-learning-guard` to
-emphasize that this package is an enforcement layer, not a decision-making
-agent. The OpenCode tool ids keep the stable `oc_learning_*` prefix for
-compatibility with existing harness permissions and installed profiles.
+The OpenCode tool ids keep the stable `oc_learning_*` prefix for compatibility
+with existing host permissions.
 
 ## Tools
 
-Plugin export names:
+Stable tool ids:
 
 - `oc_learning_memory_list`
 - `oc_learning_memory_audit`
@@ -34,30 +28,9 @@ Plugin export names:
 - `oc_learning_skill_patch`
 - `oc_learning_skill_archive`
 
-The raw tool module is also kept in `src/tools.js` so an OpenCode config can
-sync it into `tools/oc_learning.js` when using OpenCode custom tools directly.
-
-## Safety model
-
-- Compact global memory only.
-- Per-entry and total memory caps.
-- Read-only cleanup audit before curation.
-- Secret and prompt-injection scanner.
-- Realpath-based path confinement to the configured OpenCode root.
-- Backups before mutation.
-- Managed-skill boundary: tools refuse unmanaged skills unless explicitly
-  approved through the host permission flow.
-- Archive instead of delete for managed skills.
-
-## What this is not
-
-This is not an autonomous self-modifying agent. The host profile owns policy,
-review, and approval. This package only enforces bounded writes once a change is
-approved.
-
 ## Usage
 
-Install this package as an OpenCode plugin with an explicit `configRoot` option:
+Install this package as an OpenCode plugin with an explicit config root:
 
 ```json
 {
@@ -67,11 +40,10 @@ Install this package as an OpenCode plugin with an explicit `configRoot` option:
 }
 ```
 
-The plugin also accepts `config_root` or the `OPENCODE_CONFIG_ROOT` environment
-variable. It intentionally fails closed without one so an installed package does
-not write to its own package directory by mistake.
+The plugin also accepts `config_root` or `OPENCODE_CONFIG_ROOT`. It fails closed
+without one.
 
-Use the smallest tool surface that fits the active profile:
+The default toolset is `none`. Expose tools explicitly:
 
 ```json
 {
@@ -89,25 +61,86 @@ Use the smallest tool surface that fits the active profile:
 
 Available toolsets:
 
-- `all` / `improver`: expose every `oc_learning_*` tool.
-- `memory-read`: expose `oc_learning_memory_list` and `oc_learning_memory_audit`.
-- `memory-write`: expose memory audit/list/add/replace/remove tools.
-- `skills-write`: expose managed-skill create/patch/archive tools.
 - `none`: expose no tools.
+- `memory-read`: expose only list and audit.
+- `memory-write`: expose memory list/audit/add/replace/remove.
+- `skills-write`: expose managed-skill create/patch/archive.
+- `all` / `improver`: expose every `oc_learning_*` tool.
 
-For tighter control, pass `enabledTools` with explicit tool ids. See
-[`docs/operational-policy.md`](docs/operational-policy.md) for the recommended
-read/write gates that keep memory useful instead of noisy.
+`enabledTools` is an explicit allowlist and takes priority over `toolset`.
+Unknown ids and unknown toolsets are rejected.
 
-For memory cleanup, run `oc_learning_memory_audit` first. It reports duplicate,
-oversized, unsafe, capacity-pressure, and scope-review candidates without
-mutating files. Apply reviewed cleanup with `oc_learning_memory_remove` or
-`oc_learning_memory_replace`; both create backups before writes and can target a
-guarded `entry_number` when duplicates make substring matching ambiguous.
+## Programmatic API
 
-For host profiles that use OpenCode custom-tool files directly, `src/tools.js`
-is also kept as a standalone tool module that can be copied into the host
-configuration by that profile's own configuration management. In that mode the
-default root is the parent directory of the copied module.
+The package entrypoint exports only the plugin and the unbound factory:
 
-This repository intentionally does not prescribe a host configuration-management workflow.
+```js
+import { createLearningGuardTools } from "opencode-learning-guard"
+
+const tools = createLearningGuardTools({ configRoot: "/home/me/.config/opencode" })
+```
+
+There is no import-time writable default instance. Write-capable tools require
+an explicit `configRoot`.
+
+For package-installed OpenCode custom-tool files, import
+`opencode-learning-guard/standalone` and set `OPENCODE_CONFIG_ROOT`.
+
+For hosts that sync tool files directly into the OpenCode config root, copy both
+files together:
+
+- `src/standalone.js` -> `<config-root>/tools/oc_learning.js`
+- `src/tools.js` -> `<config-root>/tools/tools.js`
+
+The wrapper infers the config root only from the copied
+`<config-root>/tools/oc_learning.js` placement.
+Copied mode does not require repo-local `node_modules`; package-installed mode
+uses the OpenCode package adapters when they are available.
+
+## Runtime Guarantees
+
+- `memory_list` and `memory_audit` are read-only. If memory is absent they do
+  not create `skills/`, `global-memory/`, `.oc_learning/`, locks, or backups.
+- Mutations compute and accept SHA-256 `expected_revision` guards.
+- Mutations are serialized with an in-process mutex plus a heartbeated
+  cross-process lock in `.oc_learning/locks/`.
+- Writes use temp files in the target directory, best-effort fsync, atomic
+  rename/replace, post-write validation, and rollback from backup on validation
+  failure.
+- Backups and manifests live under `.oc_learning/backups/` and are reported as
+  relative paths only.
+- Skill archives live under `.oc_learning/archive/` and are reported as
+  relative paths only.
+- Skill archive refuses symlinked or junctioned `skills/<name>` path components
+  before moving the skill directory into the archive.
+- After a successful archive move, manifest status updates are best-effort; the
+  JSON tool result is authoritative if only that status update fails.
+- Normal results and expected validation errors avoid absolute local paths.
+
+Tool results are JSON strings with stable fields such as `status`, `operation`,
+`target`, `before_revision`, `after_revision`, `backup`, `changed`, and
+`warnings`.
+
+## Safety Scanner
+
+The scanner is defense-in-depth. It rejects common secret assignment forms,
+private-key blocks, prompt-injection language, bidi/invisible controls, and
+reserved memory structure markers in original and normalized text. It does not
+prove absence of secrets, truth of lessons, or correct policy scope.
+
+Unsafe entries found in an existing memory file are redacted by read tools.
+Use `memory_audit` to get entry numbers and the current revision, then remove by
+`entry_number` plus `expected_revision`.
+
+Oversized legacy entries and over-capacity memory blocks are also reported by
+`memory_audit` as cleanup findings so they can be removed or replaced through
+reviewed guard-tool mutations.
+
+## Documentation
+
+- [Operational policy](docs/operational-policy.md)
+- [Threat model](docs/threat-model.md)
+- [Atomicity and recovery](docs/atomicity-and-recovery.md)
+- [Design notes](docs/design.md)
+- [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)

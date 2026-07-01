@@ -1,25 +1,13 @@
-import {
-  createLearningGuardTools,
-  memory_add,
-  memory_audit,
-  memory_list,
-  memory_remove,
-  memory_replace,
-  skill_archive,
-  skill_create,
-  skill_patch,
-} from "./tools.js"
+import { tool } from "@opencode-ai/plugin"
+import { Effect } from "effect"
+import { createLearningGuardTools as createCoreLearningGuardTools } from "./tools.js"
 
-export {
-  createLearningGuardTools,
-  memory_add,
-  memory_audit,
-  memory_list,
-  memory_remove,
-  memory_replace,
-  skill_archive,
-  skill_create,
-  skill_patch,
+export function createLearningGuardTools(options = {}) {
+  return createCoreLearningGuardTools({
+    ...options,
+    toolFactory: options.toolFactory ?? tool,
+    runPermissionEffect: options.runPermissionEffect ?? Effect.runPromise,
+  })
 }
 
 const TOOL_ALIASES = {
@@ -60,20 +48,6 @@ function pluginConfigRoot(options = {}) {
   return root
 }
 
-function enabledToolIds(options = {}) {
-  const explicit = options.enabledTools ?? options.enabled_tools
-  if (explicit !== undefined) {
-    if (!Array.isArray(explicit)) throw new Error("enabledTools must be an array of oc_learning tool ids.")
-    return validateToolIds(explicit)
-  }
-
-  const toolset = options.toolset ?? options.tool_set ?? "all"
-  if (!Object.hasOwn(TOOLSETS, toolset)) {
-    throw new Error(`Unknown toolset '${toolset}'. Use one of: ${Object.keys(TOOLSETS).join(", ")}.`)
-  }
-  return TOOLSETS[toolset]
-}
-
 function validateToolIds(toolIds) {
   for (const toolId of toolIds) {
     if (!Object.hasOwn(TOOL_ALIASES, toolId)) {
@@ -81,6 +55,20 @@ function validateToolIds(toolIds) {
     }
   }
   return [...new Set(toolIds)]
+}
+
+function enabledToolIds(options = {}) {
+  const explicit = options.enabledTools ?? options.enabled_tools
+  if (explicit !== undefined) {
+    if (!Array.isArray(explicit)) throw new Error("enabledTools must be an array of oc_learning tool ids.")
+    return validateToolIds(explicit)
+  }
+
+  const toolset = options.toolset ?? options.tool_set ?? "none"
+  if (!Object.hasOwn(TOOLSETS, toolset)) {
+    throw new Error(`Unknown toolset '${toolset}'. Use one of: ${Object.keys(TOOLSETS).join(", ")}.`)
+  }
+  return TOOLSETS[toolset]
 }
 
 function toolMap(tools, options = {}) {

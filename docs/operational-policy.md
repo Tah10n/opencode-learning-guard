@@ -1,19 +1,22 @@
 # Operational Policy
 
-The learning guard is useful only when the host harness keeps memory operations
-rare, scoped, and reviewable. It should not be treated as an always-on memory
-layer for every agent turn.
+`opencode-learning-guard` is useful only when the host harness keeps memory and
+skill writes rare, scoped, and reviewable. It is a deterministic enforcement
+layer, not an always-on memory agent.
 
 ## Tool Exposure
 
-Use the smallest tool surface that fits the active profile:
+The default toolset is `none`. A plugin stanza without `toolset` or
+`enabledTools` exposes zero tools.
 
-- Ordinary coding and review profiles should not load this plugin at all, or
-  should use `toolset: "none"` when the host needs a shared plugin stanza.
+Use the smallest explicit surface that fits the active profile:
+
+- Ordinary coding and review profiles should not load this plugin, or should
+  use `toolset: "none"` when a shared plugin stanza is needed.
 - Read-only memory inspection profiles should use `toolset: "memory-read"`.
 - Memory maintenance profiles should use `toolset: "memory-write"`.
 - Managed-skill maintenance profiles should use `toolset: "skills-write"`.
-- Dedicated improver profiles may use `toolset: "improver"`.
+- Dedicated reviewed improver profiles may use `toolset: "improver"` or `all`.
 
 For tighter control, use `enabledTools` with explicit OpenCode tool ids:
 
@@ -35,6 +38,8 @@ For tighter control, use `enabledTools` with explicit OpenCode tool ids:
 }
 ```
 
+Unknown toolsets and unknown tool ids fail closed.
+
 ## Memory Read Gate
 
 Read memory only when there is a realistic chance it will change the answer:
@@ -44,8 +49,9 @@ Read memory only when there is a realistic chance it will change the answer:
 - OpenCode configuration or harness work;
 - tasks that reference previous decisions, conventions, or workflow details.
 
-Do not read memory for simple commands, translations, one-off formatting, or
-questions that are obviously self-contained.
+`oc_learning_memory_list` and `oc_learning_memory_audit` do not initialize
+memory. If the memory file is absent, they return an absent/no-entry result
+without creating directories, locks, backups, or timestamps.
 
 ## Memory Write Gate
 
@@ -64,8 +70,8 @@ is explicitly scoped.
 ## Review And Compaction
 
 When memory approaches the total cap, consolidate instead of appending. Start
-with `oc_learning_memory_audit`; it is read-only and should be allowed anywhere
-that `oc_learning_memory_list` is allowed.
+with `oc_learning_memory_audit`; it is read-only and returns the current
+`revision`.
 
 The audit catches mechanical cleanup candidates:
 
@@ -75,17 +81,35 @@ The audit catches mechanical cleanup candidates:
 - capacity pressure;
 - entries that look project- or machine-specific and may belong in project-local docs.
 
-After review, apply cleanup with the mutating tools:
+After review, apply cleanup with mutating tools:
 
 - remove stale entries;
 - merge duplicates;
 - move project facts out of global memory;
 - keep only rules that have changed real future behavior.
 
-Use `entry_number` plus `expected_content` with `oc_learning_memory_remove` or
-`oc_learning_memory_replace` when duplicate entries make `old_text` ambiguous.
-Do not auto-apply audit findings without review; staleness and scope still need
+Use `entry_number` plus `expected_revision` with
+`oc_learning_memory_remove` or `oc_learning_memory_replace` when content is
+unsafe, duplicated, or likely to shift. Use `expected_content` as an additional
+guard when the current entry is safe to show.
+
+Entries that exceed the per-entry or total memory limit remain audit-cleanable:
+`oc_learning_memory_audit` reports them with entry numbers and the current
+revision, and reviewed remove/replace operations may reduce those violations
+without requiring manual file repair first.
+
+Do not auto-apply audit findings without review. Staleness and scope still need
 human judgment.
+
+## Backups And Recovery
+
+Every mutation creates an operation manifest under `.oc_learning/backups/`.
+When the target already exists, the same operation directory also contains an
+exact backup of the previous target bytes. Outputs return relative paths only.
+
+Backups are not deleted automatically. Retention is intentionally a host policy
+decision and should be implemented as a separate reviewed maintenance command,
+not as an implicit side effect of these tools.
 
 ## Token Budget
 

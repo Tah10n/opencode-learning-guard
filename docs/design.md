@@ -1,30 +1,29 @@
-﻿# Design
+# Design
 
 The learning guard separates policy from enforcement.
 
-This design is inspired by the self-improving agent direction in
-[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), while
-keeping this package focused on bounded OpenCode memory and managed-skill
-writes.
+Policy belongs to the host harness, prompts, skills, user review, and explicit
+approval flow:
 
-Policy:
+- decide whether a lesson is durable;
+- decide whether a skill should exist;
+- decide when an improver profile may run;
+- decide backup retention and cleanup.
 
-- Agent prompts and skills decide whether a lesson is durable.
-- The user can ask for `/learn` or `@improver`.
-- Project-specific facts belong in project-local workflow docs or skills.
+Enforcement belongs to this package:
 
-Enforcement:
+- expose only explicitly selected tools;
+- require an explicit config root for writable tools;
+- validate memory and managed-skill documents structurally;
+- reject unsafe content patterns and reserved markers;
+- keep read tools pure;
+- serialize mutations;
+- write through backup, temp file, atomic replace, and post-write validation;
+- return deterministic relative-path JSON results.
 
-- This package validates content.
-- This package writes only confined memory or managed-skill files.
-- This package creates backups before mutations.
-- This package can expose a narrowed toolset so ordinary profiles do not pay
-  for unrelated write tools.
-- Memory cleanup starts with a read-only audit. Deletion and replacement stay
-  explicit, reviewed, and backed up.
+This package does not inject memory into prompts. Token cost is controlled by
+the host choosing when to expose tools or read memory.
 
-This keeps the self-improvement loop useful without letting it rewrite the
-agent operating environment opportunistically.
-
-Token cost is a host-harness concern. This package does not inject memory into
-prompts; it only provides tools that the host may expose to selected profiles.
+The package is intentionally narrow: it writes only global memory, managed
+skills, backups, locks, and archives under the configured OpenCode config root.
+It does not provide a generic file patch tool.
